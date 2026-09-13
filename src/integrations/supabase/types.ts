@@ -608,14 +608,6 @@ export type Database = {
         }
         Returns: Json
       }
-      is_org_admin: {
-        Args: { _organization_id: string; _user_id?: string }
-        Returns: boolean
-      }
-      is_org_member: {
-        Args: { _organization_id: string; _user_id?: string }
-        Returns: boolean
-      }
     }
     Enums: {
       activity_status:

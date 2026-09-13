@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 export const Route = createFileRoute("/auth")({
+  ssr: false,
   head: () => ({ meta: [{ title: "Sign in | ProfilePulse" }, { name: "description", content: "Sign in to securely monitor organization member profiles." }, { property: "og:title", content: "Sign in | ProfilePulse" }, { property: "og:description", content: "Secure access to ProfilePulse profile monitoring." }, { property: "og:type", content: "website" }, { name: "twitter:card", content: "summary_large_image" }] }),
   component: AuthPage,
 });

@@ -9,8 +9,8 @@ export const monitorGithub = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) => monitorSchema.parse(input))
   .handler(async ({ data, context }) => {
-    const { data: admin } = await context.supabase.rpc("is_org_admin", { _organization_id: data.organizationId, _user_id: context.userId });
-    if (!admin) throw new Error("Administrator access is required to run monitoring.");
+    const { data: role } = await context.supabase.from("user_roles").select("role").eq("organization_id", data.organizationId).eq("user_id", context.userId).maybeSingle();
+    if (role?.role !== "admin") throw new Error("Administrator access is required to run monitoring.");
     const { data: settings } = await context.supabase.from("organization_settings").select("activity_threshold_days").eq("organization_id", data.organizationId).single();
     const threshold = settings?.activity_threshold_days ?? 30;
     const { data: members, error } = await context.supabase.from("members").select("id, github_username, github_url").eq("organization_id", data.organizationId).in("id", data.memberIds);
@@ -25,7 +25,7 @@ export const monitorGithub = createServerFn({ method: "POST" })
       const now = new Date().toISOString();
       try {
         const headers: Record<string, string> = { Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "ProfilePulse" };
-        if (token) headers.Authorization = `Bearer ${token}`;
+        if (token) headers["Authorization"] = `Bearer ${token}`;
         const [userResponse, reposResponse, eventsResponse] = await Promise.all([
           fetch(`https://api.github.com/users/${encodeURIComponent(member.github_username ?? "")}`, { headers }),
           fetch(`https://api.github.com/users/${encodeURIComponent(member.github_username ?? "")}/repos?sort=updated&per_page=100&type=owner`, { headers }),
@@ -47,9 +47,11 @@ export const monitorGithub = createServerFn({ method: "POST" })
         successful++;
       } catch (caught) {
         failed++;
-        const [code, message] = (caught instanceof Error ? caught.message : "github_error|GitHub monitoring failed").split("|");
-        await context.supabase.from("github_monitoring").update({ classification: "monitoring_failed", classification_reason: message ?? code, threshold_days: threshold, monitored_at: now, error_code: message ? code : "github_error", error_message: message ?? code }).eq("member_id", member.id);
-        await context.supabase.from("monitoring_history").insert({ organization_id: data.organizationId, member_id: member.id, job_id: job.id, platform: "github", classification: "monitoring_failed", reason: message ?? code, threshold_days: threshold, data_source: "GitHub REST API", success: false, error_code: message ? code : "github_error", error_message: message ?? code, monitored_at: now });
+        const [rawCode, rawMessage] = (caught instanceof Error ? caught.message : "github_error|GitHub monitoring failed").split("|");
+        const code = rawMessage ? rawCode ?? "github_error" : "github_error";
+        const message = rawMessage ?? rawCode ?? "GitHub monitoring failed";
+        await context.supabase.from("github_monitoring").update({ classification: "monitoring_failed", classification_reason: message, threshold_days: threshold, monitored_at: now, error_code: code, error_message: message }).eq("member_id", member.id);
+        await context.supabase.from("monitoring_history").insert({ organization_id: data.organizationId, member_id: member.id, job_id: job.id, platform: "github", classification: "monitoring_failed", reason: message, threshold_days: threshold, data_source: "GitHub REST API", success: false, error_code: code, error_message: message, monitored_at: now });
       }
       await context.supabase.from("monitoring_jobs").update({ processed_profiles: successful + failed, successful_profiles: successful, failed_profiles: failed }).eq("id", job.id);
     }

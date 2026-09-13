@@ -45,8 +45,8 @@ export function validateImportRow(raw: Record<string, unknown>, rowNumber: numbe
   const errors: string[] = [];
   const serialRaw = String(raw["S.No"] ?? "").trim();
   const serialNumber = /^\d+$/.test(serialRaw) && Number(serialRaw) > 0 ? Number(serialRaw) : null;
-  const name = String(raw.Name ?? "").trim();
-  const department = String(raw.Department ?? "").trim();
+  const name = String(raw["Name"] ?? "").trim();
+  const department = String(raw["Department"] ?? "").trim();
   const github = normalizeGithubUrl(String(raw["GitHub Link"] ?? ""));
   const linkedin = normalizeLinkedinUrl(String(raw["LinkedIn Link"] ?? ""));
   if (serialNumber === null) errors.push("S.No must be a positive whole number");

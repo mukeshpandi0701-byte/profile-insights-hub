@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import type { Json } from "@/integrations/supabase/types";
 import { classifyActivity } from "./profilepulse";
 
 const monitorSchema = z.object({ organizationId: z.string().uuid(), memberIds: z.array(z.string().uuid()).min(1).max(100) });
@@ -50,7 +51,7 @@ export const syncLinkedinProfile = createServerFn({ method: "POST" })
       integration_status: "connected",
       authorization_status: "authorized",
       data_availability: "profile_only",
-      authorized_profile: profile,
+      authorized_profile: profile as Json,
       authorized_activity: [],
       last_successful_sync_at: now,
       error_message: null,

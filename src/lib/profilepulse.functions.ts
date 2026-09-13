@@ -4,13 +4,67 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { classifyActivity } from "./profilepulse";
 
 const monitorSchema = z.object({ organizationId: z.string().uuid(), memberIds: z.array(z.string().uuid()).min(1).max(100) });
+const organizationSchema = z.object({ organizationId: z.string().uuid() });
+const linkedinSyncSchema = organizationSchema.extend({ memberId: z.string().uuid() });
+
+async function requireAdministrator(context: { supabase: any; userId: string }, organizationId: string) {
+  const { data: role } = await context.supabase.from("user_roles").select("role").eq("organization_id", organizationId).eq("user_id", context.userId).maybeSingle();
+  if (role?.role !== "admin") throw new Error("Administrator access is required.");
+}
+
+export const getIntegrationStatus = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) => organizationSchema.parse(input))
+  .handler(async ({ data, context }) => {
+    await requireAdministrator(context, data.organizationId);
+    return {
+      github: Boolean(process.env["GITHUB_API_KEY"] && process.env["LOVABLE_API_KEY"]),
+      linkedin: Boolean(process.env["LINKEDIN_API_KEY"] && process.env["LOVABLE_API_KEY"]),
+    };
+  });
+
+export const syncLinkedinProfile = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) => linkedinSyncSchema.parse(input))
+  .handler(async ({ data, context }) => {
+    await requireAdministrator(context, data.organizationId);
+    const lovableKey = process.env["LOVABLE_API_KEY"];
+    const linkedinKey = process.env["LINKEDIN_API_KEY"];
+    if (!lovableKey || !linkedinKey) throw new Error("Connect LinkedIn before syncing a profile.");
+    const { data: member } = await context.supabase.from("members").select("id, linkedin_url").eq("id", data.memberId).eq("organization_id", data.organizationId).maybeSingle();
+    if (!member?.linkedin_url) throw new Error("Choose a member with a LinkedIn profile URL.");
+    const response = await fetch("https://connector-gateway.lovable.dev/linkedin/v2/userinfo", {
+      headers: { Authorization: `Bearer ${lovableKey}`, "X-Connection-Api-Key": linkedinKey },
+    });
+    if (!response.ok) {
+      const detail = await response.text();
+      console.error(`LinkedIn profile sync failed [${response.status}]: ${detail}`);
+      throw new Error(`LinkedIn authorization failed (${response.status}). Reconnect LinkedIn and try again.`);
+    }
+    const profile = await response.json() as Record<string, unknown>;
+    const now = new Date().toISOString();
+    const { error } = await context.supabase.from("linkedin_integrations").upsert({
+      member_id: member.id,
+      organization_id: data.organizationId,
+      profile_url: member.linkedin_url,
+      integration_status: "connected",
+      authorization_status: "authorized",
+      data_availability: "profile_only",
+      authorized_profile: profile,
+      authorized_activity: [],
+      last_successful_sync_at: now,
+      error_message: null,
+    });
+    if (error) throw error;
+    await context.supabase.from("organization_settings").update({ linkedin_configured: true }).eq("organization_id", data.organizationId);
+    return { name: typeof profile["name"] === "string" ? profile["name"] : "LinkedIn member", syncedAt: now };
+  });
 
 export const monitorGithub = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) => monitorSchema.parse(input))
   .handler(async ({ data, context }) => {
-    const { data: role } = await context.supabase.from("user_roles").select("role").eq("organization_id", data.organizationId).eq("user_id", context.userId).maybeSingle();
-    if (role?.role !== "admin") throw new Error("Administrator access is required to run monitoring.");
+    await requireAdministrator(context, data.organizationId);
     const { data: settings } = await context.supabase.from("organization_settings").select("activity_threshold_days").eq("organization_id", data.organizationId).single();
     const threshold = settings?.activity_threshold_days ?? 30;
     const { data: members, error } = await context.supabase.from("members").select("id, github_username, github_url").eq("organization_id", data.organizationId).in("id", data.memberIds);
@@ -20,16 +74,21 @@ export const monitorGithub = createServerFn({ method: "POST" })
     if (jobError) throw new Error(jobError.code === "23505" ? "A GitHub monitoring job is already running." : jobError.message);
     let successful = 0;
     let failed = 0;
+    const lovableKey = process.env["LOVABLE_API_KEY"];
+    const githubKey = process.env["GITHUB_API_KEY"];
     const token = process.env["GITHUB_TOKEN"];
     for (const member of targets) {
       const now = new Date().toISOString();
       try {
+        const usingConnector = Boolean(lovableKey && githubKey);
+        const baseUrl = usingConnector ? "https://connector-gateway.lovable.dev/github" : "https://api.github.com";
         const headers: Record<string, string> = { Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "ProfilePulse" };
-        if (token) headers["Authorization"] = `Bearer ${token}`;
+        if (usingConnector) { headers["Authorization"] = `Bearer ${lovableKey}`; headers["X-Connection-Api-Key"] = githubKey ?? ""; }
+        else if (token) headers["Authorization"] = `Bearer ${token}`;
         const [userResponse, reposResponse, eventsResponse] = await Promise.all([
-          fetch(`https://api.github.com/users/${encodeURIComponent(member.github_username ?? "")}`, { headers }),
-          fetch(`https://api.github.com/users/${encodeURIComponent(member.github_username ?? "")}/repos?sort=updated&per_page=100&type=owner`, { headers }),
-          fetch(`https://api.github.com/users/${encodeURIComponent(member.github_username ?? "")}/events/public?per_page=100`, { headers }),
+          fetch(`${baseUrl}/users/${encodeURIComponent(member.github_username ?? "")}`, { headers }),
+          fetch(`${baseUrl}/users/${encodeURIComponent(member.github_username ?? "")}/repos?sort=updated&per_page=100&type=owner`, { headers }),
+          fetch(`${baseUrl}/users/${encodeURIComponent(member.github_username ?? "")}/events/public?per_page=100`, { headers }),
         ]);
         if (!userResponse.ok) {
           const code = userResponse.status === 403 || userResponse.status === 429 ? "rate_limited" : userResponse.status === 404 ? "profile_not_found" : "github_error";

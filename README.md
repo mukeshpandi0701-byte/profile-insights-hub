@@ -1,29 +1,56 @@
-# Welcome to your Lovable project
+# ProfilePulse
 
-This project was built with [Lovable](https://lovable.dev).
+ProfilePulse is a secure organization workspace for importing member profile URLs, monitoring permitted public GitHub activity, recording honest LinkedIn availability states, and exporting activity reports.
 
-## Build with Lovable
+## Features
 
-Open your project in the [Lovable editor](https://lovable.dev) and keep building.
+- Email/password and Google authentication
+- Organization-scoped roles and row-level data isolation
+- Excel `.xlsx` and `.xls` import with editable row validation, duplicate checks, error export, and sample template
+- Searchable, filterable, paginated member directory with bulk deletion and Excel export
+- Real GitHub REST API monitoring, public repositories/events, rate-limit reporting, retries, job progress, and monitoring history
+- Transparent activity classification using a configurable threshold
+- LinkedIn architecture that stores authorization and availability state without scraping or fabricated results
+- Dashboard and filtered Excel, CSV, and PDF reports
 
-- **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: connect the project to GitHub and every change made in Lovable is committed straight to your repository.
-- **Full ownership**: this code is yours. Push to your repository and your changes sync back into Lovable, ready for your next prompt.
+## Local development
 
-## Development
-
-Prefer working locally? You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
-
-```sh
-git clone <this-repository-url>
-cd <repository-name>
-npm i
-npm run dev
+```bash
+bun install
+bun run dev
 ```
 
-## Built with
+Lovable Cloud supplies authentication and database environment variables. Do not commit private credentials.
 
-- TanStack Start
-- TypeScript
-- React
-- Tailwind CSS
+## Optional GitHub credential
+
+Public GitHub monitoring works without a token but is limited by GitHub's unauthenticated API rate limit. For higher limits, securely configure `GITHUB_TOKEN` in project secrets. A fine-grained read-only token needs only public repository/profile read access. The token is read only inside server code and is never sent to browsers.
+
+## LinkedIn
+
+ProfilePulse does not scrape LinkedIn. Until an official LinkedIn application with approved profile/activity products is connected, the UI and reports show `Integration not configured` or `Data unavailable`. A LinkedIn URL alone never produces an activity classification.
+
+## Activity classification
+
+- **Active:** observable public GitHub activity is inside the configured threshold.
+- **Inactive:** reliable public data was returned, but the latest qualifying observation is older than the threshold.
+- **No observable activity:** public API data was insufficient or contained no qualifying observation.
+- **Data unavailable:** the profile cannot be evaluated reliably.
+- **Monitoring failed:** the API request failed; this is never treated as inactivity.
+- **Not monitored:** no check has run.
+
+## Scheduled monitoring
+
+Administrators can store a daily, weekly, or monthly preference. Automatic scheduled execution needs the app's stable published URL; activate it after publication from **More → Cloud → Jobs**. Manual and bulk monitoring are available immediately.
+
+## Tests
+
+```bash
+bun run test
+```
+
+The test suite covers URL normalization, import row validation, missing optional links, and classification thresholds. Database row-level access policies are also checked by the Lovable Cloud security linter.
+
+## Data model
+
+Persistent tables cover organizations, roles, departments, settings, import batches, members, GitHub snapshots, LinkedIn integration states, monitoring jobs, monitoring history, and report audit records. Every user-facing table uses row-level access controls, and roles are stored separately from members or profiles.

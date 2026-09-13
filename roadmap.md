@@ -1,0 +1,2 @@
+- [ ] Add secure GitHub API token setup in administrator settings with clear guidance
+- [ ] Add authorized LinkedIn integration configuration and real dashboard activity
